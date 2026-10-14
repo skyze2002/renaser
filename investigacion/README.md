@@ -1,6 +1,6 @@
 # Pregunta 7 — Investigación
 
-Documento completo: [`RENASER_Investigacion.docx`](RENASER_Investigacion.docx)
+Documento completo: [`RENASER_Investigacion.pdf`](RENASER_Investigacion.pdf) (versión editable: [`.docx`](RENASER_Investigacion.docx))
 
 **Recomendación:** automatizar el proceso comercial con el CRM como única fuente de verdad y n8n
 como motor de seguimiento, durante los próximos siete días.
