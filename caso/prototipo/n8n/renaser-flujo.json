@@ -1,0 +1,183 @@
+{
+  "name": "RENASER - Registro a seguimiento",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "renaser/lead",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "1. Registro (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "renaser-lead"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3001/leads",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "2. Guardar en CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Misma lógica que flujo/clasificar.js\nconst lead = $json.lead;\nconst PESO_ORIGEN = { referido: 30, formulario: 20, whatsapp: 20, evento_anterior: 25, anuncio: 10 };\nconst SENALES = [\n  { re: /inscrib|reserv|separar|cupo/i, pts: 30, motivo: 'quiere inscribirse' },\n  { re: /precio|cu[aá]nto|costo|pag(o|ar)/i, pts: 20, motivo: 'pregunta por precio o pago' },\n  { re: /cu[aá]ndo|fecha|d[oó]nde|lugar|\\bhora\\b|horario/i, pts: 15, motivo: 'pregunta logística' },\n  { re: /grupo|equipo|somos \\d+|\\d+ personas/i, pts: 15, motivo: 'viene en grupo' },\n  { re: /solo informaci|m[aá]s adelante|no s[eé]/i, pts: -15, motivo: 'interés bajo' },\n];\nconst nivel = (p) => (p >= 60 ? 'caliente' : p >= 30 ? 'tibio' : 'frio');\n\nlet puntaje = 0;\nconst motivos = [];\nconst o = PESO_ORIGEN[lead.origen] ?? 0;\nif (o) { puntaje += o; motivos.push(`origen ${lead.origen} (+${o})`); }\nfor (const s of SENALES) if (s.re.test(lead.mensaje || '')) { puntaje += s.pts; motivos.push(`${s.motivo} (${s.pts > 0 ? '+' : ''}${s.pts})`); }\nif (lead.email && lead.telefono) { puntaje += 10; motivos.push('datos completos (+10)'); }\npuntaje = Math.max(0, Math.min(100, puntaje));\n\n// Un lead que vuelve a escribir nunca baja de clasificación\nif (lead.puntaje != null && lead.puntaje > puntaje) { puntaje = lead.puntaje; motivos.push(`se mantiene puntaje previo (${puntaje})`); }\nconst clasificacion = nivel(puntaje);\n\nconst protegido = ['requiere_humano', 'inscrito', 'confirmado', 'asistio'].includes(lead.etapa);\nconst accion = protegido ? 'protegido' : !lead.consentimiento ? 'sin_consentimiento' : 'enviar';\n\nconst nombre = lead.nombre.split(' ')[0];\nconst planes = {\n  caliente: { plantilla: 'bienvenida_inscripcion', etapa: 'requiere_humano', texto: `Hola ${nombre}, gracias por tu interés. Te escribirá alguien del equipo en breve para ayudarte con tu inscripción.` },\n  tibio: { plantilla: 'info_evento', etapa: 'contactado', texto: `Hola ${nombre}, te comparto los detalles del evento (fecha, lugar y precio). ¿Te separo un cupo?` },\n  frio: { plantilla: 'nutricion', etapa: 'contactado', texto: `Hola ${nombre}, gracias por escribirnos. Te avisaremos de las próximas fechas.` },\n};\n\nreturn { json: { lead_id: lead.id, etapa_actual: lead.etapa, puntaje, clasificacion, motivos, accion, plan: planes[clasificacion] } };"
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "3. Clasificar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://localhost:3001/leads/{{ $json.lead_id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(Object.assign({ puntaje: $json.puntaje, clasificacion: $json.clasificacion, motivos: $json.motivos, evento: 'clasificacion' }, $json.etapa_actual === 'nuevo' ? { etapa: 'clasificado' } : {})) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "4. Guardar clasificación",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  { "id": "c1", "leftValue": "={{ $('3. Clasificar').item.json.accion }}", "rightValue": "enviar", "operator": { "type": "string", "operation": "equals" } }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "enviar"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  { "id": "c2", "leftValue": "={{ $('3. Clasificar').item.json.accion }}", "rightValue": "sin_consentimiento", "operator": { "type": "string", "operation": "equals" } }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "sin_consentimiento"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  { "id": "c3", "leftValue": "={{ $('3. Clasificar').item.json.accion }}", "rightValue": "protegido", "operator": { "type": "string", "operation": "equals" } }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "protegido"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "5. ¿Qué hacer?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3001/whatsapp/send",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $('3. Clasificar').item.json.lead_id, plantilla: $('3. Clasificar').item.json.plan.plantilla, texto: $('3. Clasificar').item.json.plan.texto }) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "6a. Seguimiento WhatsApp (simulado)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 120]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://localhost:3001/leads/{{ $('3. Clasificar').item.json.lead_id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(Object.assign({ etapa: $('3. Clasificar').item.json.plan.etapa, evento: 'seguimiento_enviado', nota: 'Mensaje ' + $json.id }, $('3. Clasificar').item.json.plan.etapa === 'requiere_humano' ? { responsable: 'equipo_ventas' } : {})) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "7a. Actualizar estado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 120]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://localhost:3001/leads/{{ $('3. Clasificar').item.json.lead_id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ etapa: 'pendiente_consentimiento', evento: 'bloqueo_consentimiento', nota: 'No se envía mensaje sin opt-in' }) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000008",
+      "name": "6b. Marcar sin consentimiento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://localhost:3001/leads/{{ $('3. Clasificar').item.json.lead_id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ evento: 'alerta_responsable', nota: 'Nuevo mensaje de un lead asignado; responde una persona' }) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000009",
+      "name": "6c. Alertar al responsable",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 480]
+    }
+  ],
+  "connections": {
+    "1. Registro (Webhook)": { "main": [[{ "node": "2. Guardar en CRM", "type": "main", "index": 0 }]] },
+    "2. Guardar en CRM": { "main": [[{ "node": "3. Clasificar", "type": "main", "index": 0 }]] },
+    "3. Clasificar": { "main": [[{ "node": "4. Guardar clasificación", "type": "main", "index": 0 }]] },
+    "4. Guardar clasificación": { "main": [[{ "node": "5. ¿Qué hacer?", "type": "main", "index": 0 }]] },
+    "5. ¿Qué hacer?": {
+      "main": [
+        [{ "node": "6a. Seguimiento WhatsApp (simulado)", "type": "main", "index": 0 }],
+        [{ "node": "6b. Marcar sin consentimiento", "type": "main", "index": 0 }],
+        [{ "node": "6c. Alertar al responsable", "type": "main", "index": 0 }]
+      ]
+    },
+    "6a. Seguimiento WhatsApp (simulado)": { "main": [[{ "node": "7a. Actualizar estado", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

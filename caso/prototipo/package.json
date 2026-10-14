@@ -1,0 +1,13 @@
+{
+  "name": "renaser-prototipo",
+  "version": "1.0.0",
+  "description": "Flujo registro → almacenamiento → clasificación → seguimiento → estado actualizado",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "crm": "node crm-mock/server.js",
+    "demo": "node scripts/demo.js",
+    "test": "node --test"
+  }
+}
